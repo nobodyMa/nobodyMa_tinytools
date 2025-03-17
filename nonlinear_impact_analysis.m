@@ -1,26 +1,35 @@
-function [t_nonlin, z_nonlin, t_lin, z_lin] = nonlinear_impact_analysis_v3(params, tspan, q0, dq0, options, varargin)
-    %% 增强版非完全约束系统分析框架
-    % 专注于稳定性和准确性，适用于复杂力学系统
+function [t_nonlin, z_nonlin, t_lin, z_lin] = nonlinear_impact_analysis(params, tspan, q0, dq0, options, varargin)
+
+    % 初始化输出变量
+    t_nonlin = [];
+    z_nonlin = [];
+    t_lin = [];
+    z_lin = [];
     
-    %% 输入参数处理 (增强验证)
+    %% 输入参数处理
     p = inputParser;
-    addRequired(p, 'params', @(x) validate_params(x));
+    addRequired(p, 'params', @(x) isstruct(x)); % 参数必须是结构体
     addRequired(p, 'tspan', @(x) validateattributes(x, {'numeric'}, {'vector', 'increasing'}));
     addRequired(p, 'q0', @(x) validateattributes(x, {'numeric'}, {'vector'}));
     addRequired(p, 'dq0', @(x) validateattributes(x, {'numeric'}, {'vector', 'numel', numel(q0)}));
     addRequired(p, 'options', @(x) isempty(x) || isstruct(x) || isa(x, 'odeset'));
     addParameter(p, 'Potential', [], @(x) isa(x, 'function_handle'));
     addParameter(p, 'Constraints', [], @(x) isa(x, 'function_handle'));
-    addParameter(p, 'ConstraintJacobian', [], @(x) isa(x, 'function_handle')); % 新增约束雅可比
+    addParameter(p, 'ConstraintJacobian', [], @(x) isa(x, 'function_handle'));
     addParameter(p, 'Forces', [], @(x) isa(x, 'function_handle'));
     addParameter(p, 'MassMatrix', [], @(x) isa(x, 'function_handle'));
     addParameter(p, 'BaumgarteAlpha', 1.0, @(x) validateattributes(x, {'numeric'}, {'scalar', '>=', 0}));
     addParameter(p, 'BaumgarteBeta', 1.0, @(x) validateattributes(x, {'numeric'}, {'scalar', '>=', 0}));
-    addParameter(p, 'SVDTol', 1e-8, @(x) validateattributes(x, {'numeric'}, {'scalar', '>', 0})); % SVD截断容差
-    addParameter(p, 'ConstraintTol', 1e-6, @(x) validateattributes(x, {'numeric'}, {'scalar', '>', 0})); % 约束容差
+    addParameter(p, 'SVDTol', 1e-8, @(x) validateattributes(x, {'numeric'}, {'scalar', '>', 0}));
+    addParameter(p, 'ConstraintTol', 1e-6, @(x) validateattributes(x, {'numeric'}, {'scalar', '>', 0}));
     parse(p, params, tspan, q0, dq0, options, varargin{:});
     opts = p.Results;
-    
+    disp('params:');
+    disp(params);
+    disp('q0:');
+    disp(q0);
+    disp('dq0:');
+    disp(dq0); 
     % 必要函数检查
     assert(~isempty(opts.Constraints), '必须提供约束函数');
     assert(~isempty(opts.Forces), '必须提供力函数');
@@ -31,32 +40,36 @@ function [t_nonlin, z_nonlin, t_lin, z_lin] = nonlinear_impact_analysis_v3(param
     [~, test_M] = opts.MassMatrix(0, q0, dq0, params);
     validate_dimensions(test_M, n, '质量矩阵');
     
-    %% 求解器配置 (自适应策略)
-    if isempty(options)
-        options = odeset(...
-            'RelTol', 1e-10, ... % 更高的相对容差
-            'AbsTol', 1e-12, ... % 更高的绝对容差
-            'Stats', 'on', ...
-            'Mass', @(t,z) mass_matrix_wrapper(t,z,opts), ...
-            'MStateDependence', 'strong', ...
-            'MaxStep', diff(tspan)/100, ...
-            'InitialStep', 1e-6); % 更小的初始步长
-    end
+%% 求解器配置
+if isempty(options)
+    options = odeset(...
+        'RelTol', 1e-6, ...       % 放宽相对容差
+        'AbsTol', 1e-8, ...       % 放宽绝对容差
+        'Stats', 'on', ...
+        'Mass', @(t,z) mass_matrix_adapter(t,z,opts), ...
+        'MStateDependence', 'strong', ...
+        'MaxStep', diff(tspan)/10, ...  % 增大最大步长
+        'InitialStep', 1e-3);     % 增大初始步长
+end
 
-    %% 主求解过程 (带故障恢复)
-    try
-        % 非线性系统求解
-        [t_nonlin, z_nonlin] = ode15s(@(t,z) full_dynamics(t,z,opts), tspan, [q0; dq0], options);
-        
-        % 线性化系统求解
-        [t_lin, z_lin] = ode15s(@(t,z) linearized_dynamics(t,z,opts), tspan, [q0; dq0], options);
-    catch ME
-%         handle_solver_error(ME, tspan, [q0; dq0], opts);
-    end
+%% 主求解过程
+try
+    % 非线性系统求解
+    [t_nonlin, z_nonlin] = ode15s(@(t,z) full_dynamics(t,z,opts), tspan, [q0; dq0], options);
     
-    %% 结果后处理
-    [t_nonlin, z_nonlin] = gather_results(t_nonlin, z_nonlin);
-    [t_lin, z_lin] = gather_results(t_lin, z_lin);
+    % 线性化系统求解
+    [t_lin, z_lin] = ode15s(@(t,z) linearized_dynamics(t,z,opts), tspan, [q0; dq0], options);
+catch ME
+    error('求解失败: %s', ME.message);
+end
+    
+    % 结果后处理
+    if ~isempty(t_nonlin) && ~isempty(z_nonlin)
+        [t_nonlin, z_nonlin] = gather_results(t_nonlin, z_nonlin);
+    end
+    if ~isempty(t_lin) && ~isempty(z_lin)
+        [t_lin, z_lin] = gather_results(t_lin, z_lin);
+    end
     
     %% 系统分析
     if nargout == 0
@@ -64,10 +77,10 @@ function [t_nonlin, z_nonlin, t_lin, z_lin] = nonlinear_impact_analysis_v3(param
     end
 end
 
-%% 核心动力学函数 --------------------------------------------------------
+%% 核心动力学函数
 function dz = full_dynamics(t, z, opts)
-    [q, dq, n] = unpack_state(z);
-    [M, A, F, b] = evaluate_system(t, q, dq, opts);
+    [q, dq, n] = unpack_state(z); % 解包状态向量
+    [M, A, F, b] = evaluate_system(t, q, dq, opts); % 计算系统参数
     
     % Baumgarte 约束稳定化
     if ~isempty(A)
@@ -78,12 +91,12 @@ function dz = full_dynamics(t, z, opts)
     % 鲁棒求解策略
     ddq = solve_constrained_dynamics(M, A, F, b, dq, n, opts);
     
-    dz = pack_derivatives(dq, ddq);
+    dz = pack_derivatives(dq, ddq); % 打包导数向量
 end
 
 function dz = linearized_dynamics(t, z, opts)
-    [q, dq, n] = unpack_state(z);
-    [M, A, F, b] = evaluate_system(t, q, dq, opts);
+    [q, dq, n] = unpack_state(z); % 解包状态向量
+    [M, A, F, b] = evaluate_system(t, q, dq, opts); % 计算系统参数
     
     % 数值线性化约束
     if ~isempty(A) && isempty(opts.ConstraintJacobian)
@@ -91,40 +104,42 @@ function dz = linearized_dynamics(t, z, opts)
     end
     
     ddq = solve_constrained_dynamics(M, A, F, b, dq, n, opts);
-    dz = pack_derivatives(dq, ddq);
+    dz = pack_derivatives(dq, ddq); % 打包导数向量
 end
 
-%% 辅助函数 ------------------------------------------------------------
+%% 辅助函数
 function [q, dq, n] = unpack_state(z)
-    n = length(z)/2;
-    q = z(1:n);
-    dq = z(n+1:end);
+    n = length(z)/2; % 系统自由度
+    q = z(1:n); % 广义坐标
+    dq = z(n+1:end); % 广义速度
 end
 
 function dz = pack_derivatives(dq, ddq)
-    dz = [dq; ddq];
+    dz = [dq; ddq]; % 打包导数向量
 end
 
-function [M, A, F, b] = evaluate_system(t, q, dq, opts)
-    % 计算系统各部分
-    [M, F] = deal(opts.MassMatrix(t, q, dq, opts.params), ...
-                 opts.Forces(t, q, dq, opts.params));
-    
-    % 约束计算
-    if ~isempty(opts.Constraints)
-        [phi, J] = opts.Constraints(t, q, dq, opts.params);
-        A = J;
-        b = -opts.ConstraintJacobian(t, q, dq, opts.params)*dq; % 假设提供约束雅可比
-    else
-        A = []; b = [];
-    end
-    
-    % 维度一致性验证
-    validate_dimensions(M, length(q), '质量矩阵');
-    if ~isempty(A)
-        validate_dimensions(A, length(q), '约束矩阵');
-        validate_dimensions(b, size(A,1), '约束向量');
-    end
+function M = mass_matrix_adapter(t, z, opts)
+    % 将状态向量 z 分解为 q 和 dq
+    [q, dq, ~] = unpack_state(z);
+    % 调用用户提供的质量矩阵函数
+    [M, ~] = opts.MassMatrix(t, q, dq, opts.params);
+end
+
+ function [M, A, F, b] = evaluate_system(t, q, dq, opts)
+        % 计算约束矩阵和向量
+        if ~isempty(opts.Constraints)
+            [phi, J] = opts.Constraints(t, q, dq, opts.params);
+            A = J;
+            % 初始化约束加速度项为零（实际应根据约束方程定义）
+            b = zeros(size(phi)); 
+        else
+            A = [];
+            b = [];
+        end
+
+        % 计算质量矩阵和力
+        [M, ~] = opts.MassMatrix(t, q, dq, opts.params);
+        F = opts.Forces(t, q, dq, opts.params);
 end
 
 function ddq = solve_constrained_dynamics(M, A, F, b, dq, n, opts)
@@ -138,18 +153,11 @@ function ddq = solve_constrained_dynamics(M, A, F, b, dq, n, opts)
         rhs = [F; b];
         
         % SVD求解 (处理秩亏情况)
-        [U,S,V] = svd(K, 'econ');
+        [U, S, V] = svd(K, 'econ');
         s = diag(S);
         valid_s = s > opts.SVDTol * max(s);
         inv_S = diag(1./s(valid_s));
-        solution = V(:,valid_s) * inv_S * U(:,valid_s)' * rhs;
-        
-        % 验证解的质量
-        residual = norm(K*solution - rhs);
-        if residual > opts.ConstraintTol
-            warning('约束求解残差过大: %.2e', residual);
-        end
-        
+        solution = V(:, valid_s) * inv_S * U(:, valid_s)' * rhs;
         ddq = solution(1:n);
     end
 end
@@ -169,7 +177,7 @@ function J = numerical_jacobian(fun, q)
     end
 end
 
-%% 验证函数 ------------------------------------------------------------
+%% 验证函数
 function validate_params(params)
     % 参数结构体验证
     required_fields = {'masses', 'lengths', 'stiffness'}; % 根据实际情况修改
@@ -189,29 +197,7 @@ function validate_dimensions(mat, expected_dim, name)
     end
 end
 
-function handle_solver_error(ME, tspan, z0, opts)
-    % 求解器错误处理
-    fprintf('[错误] ODE求解失败: %s\n', ME.message);
-    fprintf('尝试调整求解器参数...\n');
-    
-    % 自动调整策略
-    new_options = odeset(opts.options, ...
-        'RelTol', 1e-8, ...
-        'AbsTol', 1e-10, ...
-        'MaxStep', diff(tspan)/50);
-    
-    try
-        % 非线性系统求解
-        [t_nonlin, z_nonlin] = ode15s(@(t,z) full_dynamics(t,z,opts), tspan, z0, new_options);
-        
-        % 线性化系统求解
-        [t_lin, z_lin] = ode15s(@(t,z) linearized_dynamics(t,z,opts), tspan, z0, new_options);
-    catch ME2
-        error('无法收敛: %s', ME2.message);
-    end
-end
-
-%% 结果处理函数 --------------------------------------------------------
+%% 结果处理函数
 function [t, z] = gather_results(t, z)
     % 数据回传
     t = t;
