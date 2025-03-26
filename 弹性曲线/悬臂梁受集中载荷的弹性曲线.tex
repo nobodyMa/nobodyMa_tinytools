@@ -1,0 +1,113 @@
+\documentclass[12pt, a4paper,oneside, UTF8]{ctexart} % +  这一句是新增加的
+\usepackage{amsmath}   % 数学公式
+\usepackage{amsthm}    % 定理环境
+\usepackage{enumitem}  % 列表
+\usepackage{amssymb}   % 更多公式符号
+\usepackage{geometry}  % 页面调整
+\usepackage[dvipsnames]{xcolor}
+
+
+\geometry{top=25.4mm,bottom=25.4mm,left=20mm,right=20mm,headheight=2.17cm,headsep=4mm,footskip=12mm}
+\everymath{\displaystyle} % 全局设置所有行内数学为displaystyle
+\allowdisplaybreaks % 允许公式跨页换行
+
+\definecolor{b1}{RGB}{0,191,255}    %deep sky blue
+\newtheorem*{zhu}{\indent \textcolor{b1}{注}}
+
+\begin{document}
+\title{悬臂梁受集中载荷的弹性曲线}
+\author{无名氏马}
+\maketitle
+\begin{enumerate}
+    \item  描述\\
+    考虑一端固定（\(x=0\)）的悬臂梁，自由端（\(x=L\)）受集中力 \(F\)，边界条件为 \(y(0)=0\) 和 \(y'(0)=0\)。
+    在不简化曲率半径的情况下，推导其挠度 \(y(x)\) 的解析解，并验证在该问题下几种数值计算方法的精度。
+    
+    \item  建立微分方程\\
+    悬臂梁的弯矩分布为 \(M(x) = -F(L - x)\)，代入精确曲率公式：
+    \[
+    \frac{y''}{(1 + y'^2)^{3/2}} = \frac{F(L - x)}{EI} 
+    \]
+    令 \(p = y'\)，则方程变为：
+    \[
+    \frac{dp}{(1 + p^2)^{3/2}} = \frac{F}{EI}(L - x) dx 
+    \]
+    
+    \item  第一次积分\\
+    对两边积分，应用边界条件 \(p(0) = 0\)：
+    \[
+    \int_0^{p(x)} \frac{dp}{(1 + p^2)^{3/2}} = \frac{F}{EI} \int_0^x (L - s) ds 
+    \]
+    左侧积分结果为：
+    \[
+    \frac{p}{\sqrt{1 + p^2}} = \frac{F}{EI} \left(Lx - \frac{x^2}{2}\right) \triangleq u(x) 
+    \]
+解得：
+\[
+p = \frac{u(x)}{\sqrt{1 - u(x)^2}}, \quad u(x) = k\left(Lx - \frac{x^2}{2}\right), \quad k = \frac{F}{EI} 
+\]
+
+\item 第二次积分与椭圆积分引入\\
+挠度表达式为：
+\[
+y(x) = \int_0^x \frac{u(s)}{\sqrt{1 - u(s)^2}} ds 
+\]
+作变量替换：
+\[
+u(s) = \sin\theta \implies \theta(s) = \arcsin(u(s)), \quad d\theta = \frac{du}{\sqrt{1 - u^2}} 
+\]
+代入后积分变为：
+\[
+y(x) = \int_{\theta(0)}^{\theta(x)} \frac{\sin\theta}{\sqrt{1 - \sin^2\theta}} \cdot \frac{ds}{d\theta} d\theta 
+\]
+由 \(u(s) = \sin\theta\) 和 \(du = k(L - s)ds\)，得：
+\[
+\frac{ds}{d\theta} = \frac{1}{k(L - s)\cos\theta} 
+\]
+整理后积分表达式为：
+\[
+y(x) = \frac{1}{k} \int_0^{\theta(x)} \frac{\sin\theta}{L - s(\theta)} d\theta 
+\]
+
+\item 转换为标准椭圆积分\\
+定义无量纲参数：
+\(m =\frac{2FL}{EI} \)，积分最终化为：
+\[
+y(x) = \frac{1}{\sqrt{m}} \int_0^{\theta(x)} \frac{\sin\theta}{\sqrt{1 - m\sin\theta}} d\theta 
+\]
+此积分可分解为第一类和第二类椭圆积分：
+\[
+y(x) = \frac{1}{\sqrt{m}} \left[ F(\theta(x), m) - E(\theta(x), m) \right],
+\]
+其中：
+\[
+\theta(x) = \arcsin\left(\frac{mL}{2} \left(2\frac{x}{L} - \left(\frac{x}{L}\right)^2\right)\right) 
+\]
+    
+    \item  应用边界条件
+    \begin{itemize}
+        \item 固定端条件 \(y(0) = 0\)：积分下限 \(\theta(0) = 0\)，自然满足。
+        \item 自由端条件 \(y'(L) = 0\)：需验证 \(p(L) = 0\)，但由于自由端 \(M(L)=0\)，方程自动满足。
+    \end{itemize}
+    
+    \item  椭圆积分的参数与物理意义
+    \begin{itemize}
+        \item 模数 \(m\)：反映载荷大小与梁刚度的比值，\(m = \frac{F}{2EI/L^2}\)。当 \(m < 1\) 时解为实数，对应小变形；\(m \to 1\) 时趋于奇异，预示失稳。
+        \item 幅角 \(\theta(x)\)：由 \(u(x) = \sin\theta(x)\) 定义，几何上表示曲率引起的转角。
+    \end{itemize}
+    
+    \item  解析解的最终形式
+    \[
+    y(x) = \frac{L}{\sqrt{2k}} \left[ F\left(\theta(x), m\right) - E\left(\theta(x), m\right) \right],
+    \]
+    其中：
+    \[
+    \theta(x) = \arcsin\left( k \left(2\frac{x}{L} - \left(\frac{x}{L}\right)^2 \right) \right), \quad k = \frac{F L^2}{2EI} 
+    \]
+\end{enumerate}
+\begin{zhu}
+    小变形极限：当 \(k \to 0\)（即 \(F \to 0\)），椭圆积分退化为多项式，恢复经典解 \( y(x) \approx \frac{Fx^2(3L - x)}{6EI} \)。
+\end{zhu}
+
+
+\end{document}
